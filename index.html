@@ -93,12 +93,21 @@
     }
     .formula div + div { margin-top: 6px; }
     .note { color: var(--muted); font-size: 0.85rem; margin: 0; }
+    .compare { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
+    @media (max-width: 480px) { .compare { grid-template-columns: 1fr; } }
+    .compare > div { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+    .compare .result-value { font-size: 1.3rem; color: var(--text); }
+    .warn { color: var(--error); font-size: 0.9rem; margin: 12px 0 0; }
+    .warn:empty { display: none; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-top: 8px; }
+    td { padding: 4px 6px; border-bottom: 1px solid var(--border); }
+    td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
   </style>
 </head>
 <body>
   <main>
     <h1>SF6 가스 밀도 계산기</h1>
-    <p class="subtitle">측정 압력·온도를 20°C 기준 환산 압력으로 변환합니다.</p>
+    <p class="subtitle">측정 압력·온도를 Beattie-Bridgeman 상태방정식으로 20°C 기준 환산 압력으로 변환합니다.</p>
 
     <form class="card" id="calc-form" novalidate>
       <div class="fields">
@@ -116,38 +125,109 @@
     </form>
 
     <section class="card" aria-live="polite">
-      <p class="result-label">20°C 환산 압력 (P<sub>20</sub>)</p>
+      <p class="result-label">20°C 환산 압력 (P<sub>20</sub>) · Beattie-Bridgeman</p>
       <p class="result-value" id="result">— <small>MPa abs</small></p>
+      <p class="note" id="density">밀도 ρ = — kg/m³</p>
+      <div class="compare">
+        <div>
+          <p class="result-label">Beattie-Bridgeman</p>
+          <p class="result-value" id="result-bb">—</p>
+        </div>
+        <div>
+          <p class="result-label">이상기체</p>
+          <p class="result-value" id="result-ideal">—</p>
+        </div>
+        <div>
+          <p class="result-label">이상기체 오차</p>
+          <p class="result-value" id="result-error">—</p>
+        </div>
+      </div>
+      <p class="warn" id="warn" role="status"></p>
     </section>
 
     <section class="card">
-      <h2>계산식 (이상기체 근사)</h2>
-      <div class="formula" id="formula">
-        <div>P<sub>1</sub> / T<sub>1</sub> = P<sub>2</sub> / T<sub>2</sub></div>
-        <div>P<sub>20</sub> = P<sub>1</sub> × (293.15 / (t<sub>1</sub> + 273.15))</div>
+      <h2>계산식 (Beattie-Bridgeman 상태방정식)</h2>
+      <div class="formula">
+        <div>p = R·T·(1 − ε)·(v + B) / v² − A / v²</div>
+        <div>A = A<sub>0</sub>(1 − a/v), B = B<sub>0</sub>(1 − b/v), ε = c / (v·T³), v = 1/ρ</div>
+      </div>
+      <table aria-label="SF6 Beattie-Bridgeman 상수">
+        <tr><td>R</td><td>56.927 J/(kg·K)</td></tr>
+        <tr><td>A<sub>0</sub></td><td>30.03 Pa·m⁶/kg²</td></tr>
+        <tr><td>a</td><td>7.808×10⁻⁴ m³/kg</td></tr>
+        <tr><td>B<sub>0</sub></td><td>7.150×10⁻⁴ m³/kg</td></tr>
+        <tr><td>b</td><td>1.567×10⁻⁵ m³/kg</td></tr>
+        <tr><td>c</td><td>2.185×10⁴ m³·K³/kg</td></tr>
+      </table>
+      <p class="note" style="margin-top:12px">
+        절차: ① 측정 (P<sub>1</sub>, T<sub>1</sub>)에서 밀도 ρ를 수치해석으로 구함 →
+        ② 밀폐 용기이므로 ρ 일정 → ③ 같은 ρ, T = 293.15 K에서 P<sub>20</sub> 계산.
+      </p>
+      <div class="formula" id="formula" style="margin-top:12px">
+        <div>값을 입력하면 대입 과정이 표시됩니다.</div>
       </div>
       <p class="note" style="margin-top:12px">
-        T는 절대온도(K) = °C + 273.15. 밀폐 용기(체적 일정, 밀도 일정) 가정.
-        실제 SF6는 고압·저온에서 이상기체와 편차가 있으므로 정밀 판정에는 제조사 밀도 곡선을 참고하세요.
+        상수는 SF6 기준 상태방정식(Guder &amp; Wagner 2009, CoolProp 구현)에
+        −40~80°C, 0.1~1.2 MPa abs 기체 영역에서 최소제곱 피팅한 값입니다(압력 최대 편차 0.04%).
+        이 범위 밖이나 액화 영역에서는 정확도가 보장되지 않습니다.
+        이상기체 비교식: P<sub>20</sub> = P<sub>1</sub> × 293.15 / T<sub>1</sub>.
       </p>
     </section>
   </main>
 
   <script>
-    const T_REF_C = 20;
     const KELVIN = 273.15;
+    const T_REF = 20 + KELVIN;
+
+    // SF6 Beattie-Bridgeman constants (SI, per unit mass), fitted to the
+    // Guder & Wagner (2009) reference EOS over -40..80 °C, 0.1..1.2 MPa abs.
+    const BB = { R: 56.927, A0: 30.03, a: 7.808e-4, B0: 7.150e-4, b: 1.567e-5, c: 2.185e4 };
+    const FIT_RANGE = { tMin: -40, tMax: 80, pMin: 0.1, pMax: 1.2 };
 
     const form = document.getElementById('calc-form');
     const pInput = document.getElementById('pressure');
     const tInput = document.getElementById('temperature');
     const errorEl = document.getElementById('error');
+    const warnEl = document.getElementById('warn');
     const resultEl = document.getElementById('result');
+    const densityEl = document.getElementById('density');
+    const bbEl = document.getElementById('result-bb');
+    const idealEl = document.getElementById('result-ideal');
+    const errEl = document.getElementById('result-error');
     const formulaEl = document.getElementById('formula');
 
     const fmt = (n, d) => Number(n).toFixed(d);
 
+    // Pressure [Pa] from density [kg/m³] and temperature [K].
+    function bbPressure(rho, T) {
+      const v = 1 / rho;
+      const A = BB.A0 * (1 - BB.a / v);
+      const B = BB.B0 * (1 - BB.b / v);
+      const eps = BB.c / (v * T ** 3);
+      return BB.R * T * (1 - eps) * (v + B) / v ** 2 - A / v ** 2;
+    }
+
+    // Density [kg/m³] for pressure [Pa] and temperature [K], by bisection
+    // on the gas branch (p increases monotonically with rho there).
+    function bbDensity(p, T) {
+      let lo = 0;
+      let hi = 3 * p / (BB.R * T);
+      if (bbPressure(hi, T) < p) return NaN;
+      for (let i = 0; i < 200; i++) {
+        const mid = (lo + hi) / 2;
+        if (bbPressure(mid, T) < p) lo = mid; else hi = mid;
+      }
+      return (lo + hi) / 2;
+    }
+
+    // SF6 vapour pressure [Pa], ln p = A - B/T + C ln T (fit to reference EOS, ±1%).
+    function satPressure(T) {
+      return Math.exp(20.744 - 2038.9 / T + 0.13570 * Math.log(T));
+    }
+
     function calculate() {
       errorEl.textContent = '';
+      warnEl.textContent = '';
       const p1 = parseFloat(pInput.value);
       const t1 = parseFloat(tInput.value);
 
@@ -165,17 +245,35 @@
         return;
       }
 
-      const T2 = T_REF_C + KELVIN;
-      const p20 = p1 * T2 / T1;
+      const rho = bbDensity(p1 * 1e6, T1);
+      if (!Number.isFinite(rho)) {
+        errorEl.textContent = '이 조건에서는 Beattie-Bridgeman 식의 기체 해를 찾을 수 없습니다.';
+        return;
+      }
+      const p20bb = bbPressure(rho, T_REF) / 1e6;
+      const p20ideal = p1 * T_REF / T1;
+      const errPct = (p20ideal - p20bb) / p20bb * 100;
 
-      resultEl.innerHTML = `${fmt(p20, 4)} <small>MPa abs</small>`;
+      const warnings = [];
+      if (t1 < FIT_RANGE.tMin || t1 > FIT_RANGE.tMax || p1 < FIT_RANGE.pMin || p1 > FIT_RANGE.pMax) {
+        warnings.push('입력값이 상수 피팅 범위(−40~80°C, 0.1~1.2 MPa abs)를 벗어나 정확도가 낮을 수 있습니다.');
+      }
+      if (T1 < 318.7 && p1 * 1e6 >= satPressure(T1)) {
+        warnings.push(`측정 조건이 SF6 포화압력(${fmt(satPressure(T1) / 1e6, 3)} MPa) 이상이라 액화 영역일 수 있습니다.`);
+      }
+      warnEl.textContent = warnings.join(' ');
+
+      resultEl.innerHTML = `${fmt(p20bb, 4)} <small>MPa abs</small>`;
+      densityEl.textContent = `밀도 ρ = ${fmt(rho, 2)} kg/m³`;
+      bbEl.textContent = `${fmt(p20bb, 4)} MPa`;
+      idealEl.textContent = `${fmt(p20ideal, 4)} MPa`;
+      errEl.textContent = `${errPct >= 0 ? '+' : ''}${fmt(errPct, 2)} %`;
       formulaEl.innerHTML = `
-        <div>P<sub>1</sub> / T<sub>1</sub> = P<sub>20</sub> / T<sub>20</sub></div>
         <div>T<sub>1</sub> = ${fmt(t1, 2)} + 273.15 = ${fmt(T1, 2)} K</div>
-        <div>T<sub>20</sub> = 20 + 273.15 = ${fmt(T2, 2)} K</div>
-        <div>P<sub>20</sub> = P<sub>1</sub> × T<sub>20</sub> / T<sub>1</sub></div>
-        <div>P<sub>20</sub> = ${fmt(p1, 4)} × ${fmt(T2, 2)} / ${fmt(T1, 2)}</div>
-        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;= <b>${fmt(p20, 4)} MPa abs</b></div>`;
+        <div>p(ρ, ${fmt(T1, 2)} K) = ${fmt(p1 * 1e6, 0)} Pa → ρ = ${fmt(rho, 3)} kg/m³</div>
+        <div>P<sub>20</sub> = p(${fmt(rho, 3)} kg/m³, 293.15 K) = <b>${fmt(p20bb, 4)} MPa abs</b></div>
+        <div>이상기체: ${fmt(p1, 4)} × 293.15 / ${fmt(T1, 2)} = ${fmt(p20ideal, 4)} MPa abs</div>
+        <div>오차 = (이상기체 − BB) / BB × 100 = ${fmt(errPct, 2)} %</div>`;
     }
 
     form.addEventListener('submit', (e) => {
