@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SF6 가스 밀도 계산기</title>
+  <style>
+    :root {
+      --bg: #f4f6f9;
+      --card: #ffffff;
+      --text: #1d2433;
+      --muted: #5b6577;
+      --border: #d5dbe5;
+      --accent: #0b6bcb;
+      --accent-soft: #e6f0fb;
+      --error: #c62828;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #12161d;
+        --card: #1c222c;
+        --text: #e6eaf0;
+        --muted: #9aa4b5;
+        --border: #2f3846;
+        --accent: #5aa9f5;
+        --accent-soft: #1d3147;
+        --error: #ef7b7b;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 16px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+      line-height: 1.5;
+    }
+    main { max-width: 560px; margin: 0 auto; }
+    h1 { font-size: 1.4rem; margin: 8px 0 4px; }
+    .subtitle { color: var(--muted); margin: 0 0 16px; font-size: 0.95rem; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 480px) { .fields { grid-template-columns: 1fr; } }
+    label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.95rem; }
+    .unit { color: var(--muted); font-weight: 400; }
+    input {
+      width: 100%;
+      padding: 12px;
+      font-size: 1.1rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg);
+      color: var(--text);
+    }
+    input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+    button {
+      width: 100%;
+      margin-top: 16px;
+      padding: 14px;
+      font-size: 1.05rem;
+      font-weight: 600;
+      border: 0;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+    }
+    .error { color: var(--error); margin: 12px 0 0; min-height: 1.5em; font-size: 0.95rem; }
+    .result-label { color: var(--muted); margin: 0; font-size: 0.95rem; }
+    .result-value {
+      font-size: 2.2rem;
+      font-weight: 700;
+      color: var(--accent);
+      margin: 4px 0 0;
+      font-variant-numeric: tabular-nums;
+    }
+    .result-value small { font-size: 1rem; color: var(--muted); font-weight: 500; }
+    h2 { font-size: 1.05rem; margin: 0 0 8px; }
+    .formula {
+      background: var(--accent-soft);
+      border-radius: 8px;
+      padding: 12px;
+      font-family: "Cambria Math", "Times New Roman", serif;
+      font-size: 1.05rem;
+      overflow-wrap: anywhere;
+    }
+    .formula div + div { margin-top: 6px; }
+    .note { color: var(--muted); font-size: 0.85rem; margin: 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>SF6 가스 밀도 계산기</h1>
+    <p class="subtitle">측정 압력·온도를 20°C 기준 환산 압력으로 변환합니다.</p>
+
+    <form class="card" id="calc-form" novalidate>
+      <div class="fields">
+        <div>
+          <label for="pressure">압력 <span class="unit">(MPa abs)</span></label>
+          <input id="pressure" type="number" inputmode="decimal" step="any" min="0" placeholder="예: 0.60" required>
+        </div>
+        <div>
+          <label for="temperature">온도 <span class="unit">(°C)</span></label>
+          <input id="temperature" type="number" inputmode="decimal" step="any" placeholder="예: 35" required>
+        </div>
+      </div>
+      <button type="submit">계산</button>
+      <p class="error" id="error" role="alert"></p>
+    </form>
+
+    <section class="card" aria-live="polite">
+      <p class="result-label">20°C 환산 압력 (P<sub>20</sub>)</p>
+      <p class="result-value" id="result">— <small>MPa abs</small></p>
+    </section>
+
+    <section class="card">
+      <h2>계산식 (이상기체 근사)</h2>
+      <div class="formula" id="formula">
+        <div>P<sub>1</sub> / T<sub>1</sub> = P<sub>2</sub> / T<sub>2</sub></div>
+        <div>P<sub>20</sub> = P<sub>1</sub> × (293.15 / (t<sub>1</sub> + 273.15))</div>
+      </div>
+      <p class="note" style="margin-top:12px">
+        T는 절대온도(K) = °C + 273.15. 밀폐 용기(체적 일정, 밀도 일정) 가정.
+        실제 SF6는 고압·저온에서 이상기체와 편차가 있으므로 정밀 판정에는 제조사 밀도 곡선을 참고하세요.
+      </p>
+    </section>
+  </main>
+
+  <script>
+    const T_REF_C = 20;
+    const KELVIN = 273.15;
+
+    const form = document.getElementById('calc-form');
+    const pInput = document.getElementById('pressure');
+    const tInput = document.getElementById('temperature');
+    const errorEl = document.getElementById('error');
+    const resultEl = document.getElementById('result');
+    const formulaEl = document.getElementById('formula');
+
+    const fmt = (n, d) => Number(n).toFixed(d);
+
+    function calculate() {
+      errorEl.textContent = '';
+      const p1 = parseFloat(pInput.value);
+      const t1 = parseFloat(tInput.value);
+
+      if (!Number.isFinite(p1) || !Number.isFinite(t1)) {
+        errorEl.textContent = '압력과 온도를 모두 숫자로 입력하세요.';
+        return;
+      }
+      if (p1 <= 0) {
+        errorEl.textContent = '절대압력은 0보다 커야 합니다.';
+        return;
+      }
+      const T1 = t1 + KELVIN;
+      if (T1 <= 0) {
+        errorEl.textContent = '온도는 절대영도(-273.15°C)보다 높아야 합니다.';
+        return;
+      }
+
+      const T2 = T_REF_C + KELVIN;
+      const p20 = p1 * T2 / T1;
+
+      resultEl.innerHTML = `${fmt(p20, 4)} <small>MPa abs</small>`;
+      formulaEl.innerHTML = `
+        <div>P<sub>1</sub> / T<sub>1</sub> = P<sub>20</sub> / T<sub>20</sub></div>
+        <div>T<sub>1</sub> = ${fmt(t1, 2)} + 273.15 = ${fmt(T1, 2)} K</div>
+        <div>T<sub>20</sub> = 20 + 273.15 = ${fmt(T2, 2)} K</div>
+        <div>P<sub>20</sub> = P<sub>1</sub> × T<sub>20</sub> / T<sub>1</sub></div>
+        <div>P<sub>20</sub> = ${fmt(p1, 4)} × ${fmt(T2, 2)} / ${fmt(T1, 2)}</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;= <b>${fmt(p20, 4)} MPa abs</b></div>`;
+    }
+
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      calculate();
+    });
+  </script>
+</body>
+</html>
